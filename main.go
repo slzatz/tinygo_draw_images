@@ -1,18 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"image/color"
-	"io"
 	"time"
 
 	"github.com/dropbox/godropbox/container/bitvector"
 	"tinygo.org/x/drivers/flash"
 	"tinygo.org/x/drivers/waveshare-epd/epd4in2"
-	"tinygo.org/x/tinyfs/littlefs"
 
 	"machine"
-	//"tinygo.org/x/tinydraw"
 )
 
 var (
@@ -28,9 +24,10 @@ var (
 		machine.QSPI_DATA3,
 	)
 
-	fs        = littlefs.New(blockDevice)
 	epdConfig epd4in2.Config
 )
+
+//var address = []int64{0x4000, 0x8000, 0xc000, 0x10000, 0x14000, 0x18000, 0x1c000, 0x20000}
 
 func main() {
 
@@ -39,28 +36,11 @@ func main() {
 		time.Sleep(time.Second)
 	}
 
-	flashConfig := &flash.DeviceConfig{Identifier: flash.DefaultDeviceIdentifier}
-	if err := blockDevice.Configure(flashConfig); err != nil {
-		for {
-			time.Sleep(5 * time.Second)
-			println("Config was not valid: "+err.Error(), "\r")
-		}
-	}
-
-	// Configure littlefs with parameters for caches and wear levelling
-	fs.Configure(&littlefs.Config{
-		CacheSize:     512,
-		LookaheadSize: 512,
-		BlockCycles:   100,
+	blockDevice.Configure(&flash.DeviceConfig{
+		Identifier: flash.DefaultDeviceIdentifier,
 	})
 
-	if err := fs.Mount(); err != nil {
-		println("Could not mount LittleFS filesystem: " + err.Error() + "\r\n")
-	} else {
-		println("Successfully mounted LittleFS filesystem.\r\n")
-	}
-
-	err := machine.SPI0.Configure(machine.SPIConfig{Frequency: 2000000}) //115200 worked
+	err := machine.SPI0.Configure(machine.SPIConfig{Frequency: 2000000})
 	if err != nil {
 		println(err)
 	}
@@ -81,52 +61,23 @@ func main() {
 
 	display = epd4in2.New(machine.SPI0, cs, dc, rst, busy)
 	display.Configure(epdConfig)
-	/*
-		time.Sleep(3000 * time.Millisecond)
-		display.ClearDisplay()
-		display.ClearDisplay()
-		display.ClearBuffer()
-		time.Sleep(3000 * time.Millisecond) // needs min ~3 sec
-	*/
-
-	dir, err := fs.Open("/")
-	if err != nil {
-		println("Could not open littlefs directory")
-		return
-	}
-	defer dir.Close()
-	infos, err := dir.Readdir(0)
-	if err != nil {
-		println("Could not read littlefs directory")
-		return
-	}
-
-	time.Sleep(3000 * time.Millisecond)
-	num := 0
+	time.Sleep(5000 * time.Millisecond) //3000
+	var num int64 = 1
+	buf := make([]byte, 37)
+	var addr int64 = 0
 	for {
-		fname := infos[num].Name()
-		display.ClearDisplay()
 		display.ClearBuffer()
+		display.ClearDisplay()
+		display.WaitUntilIdle()
 		time.Sleep(3000 * time.Millisecond) // needs min ~3 sec
-		f, err := fs.Open(fname)
-		//f, err := fs.Open(info.Name())
-		if err != nil {
-			println("Could not open: " + err.Error())
-			return
-		}
-		//defer f.Close()
-		buf := make([]byte, 37)
 		var i, j int16
-		for i = 0; i < 400; i++ {
+		for i = 0; i < 300; i++ { //400 300 works 310 works for everyone except Dirac
 			n := 0
-			_, err := f.Read(buf)
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				println("Error reading file: " + err.Error())
-			}
-			fmt.Printf("About to write the %d\r\n row", i)
+			//addr := address[num] + int64(i*37)
+			addr = num*0x4000 + int64(i*37)
+			//blockDevice.ReadAt(buf, int64(addr))
+			blockDevice.ReadAt(buf, addr)
+			//fmt.Printf("About to write the %d\r\n row", i)
 			bv := bitvector.NewBitVector(buf, 296)
 			for j = 0; j < 296; j++ {
 				if bv.Element(n) == 0 {
@@ -135,13 +86,15 @@ func main() {
 				n++
 			}
 		}
-		f.Close()
 		time.Sleep(1500 * time.Millisecond) // needs min ~1.5 sec
 		display.Display()
-		time.Sleep(100 * time.Second)
+		display.WaitUntilIdle()
+		time.Sleep(10 * time.Second)
 		num++
-		if num == len(infos) {
-			num = 0
+		if num == 9 { //9
+			num = 1
+		} else if num == 6 {
+			num = 7
 		}
 	}
 }
